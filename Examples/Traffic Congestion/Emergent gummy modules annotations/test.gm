@@ -1,0 +1,144 @@
+package org.gummymodules.generated;
+
+
+import java.util.HashMap;
+import java.util.ArrayList;
+import org.gummymodules.app.Test;
+
+
+eventtype CarEvent extends EventType {
+	string id;
+	Test.CarCoordinate coordinate; 
+	Long time;
+}
+eventtype LogEvent extends EventType {}
+eventtype DisplayEvent extends EventType {}
+eventtype GetInfoEvent extends EventType {
+	Long waitingTime;
+}
+
+/*
+This event type is just used in order to reset all gummy modules
+*/
+eventtype ResetEvent extends EventType {}
+
+
+/*
+The Traffic Congestion example has been taken from Ms Malakuti. 
+This module represents a road segment with specific coordinates. 
+The module is interested in each car event its car coordinates are 
+within the segment coordinates. It computes the average waiting for 
+all relevant cars. If the average waiting exceeds a certain threshold 
+W, a traffic congestion is assumed. In this case, the module is 
+constructed and the value can be logged and and displayed. 
+If the value goes below W, the module is destructed. 
+*/
+emergentgummymodule TrafficCongestion(Test.SegmentCoordinate segmentCoordinate) {
+	
+	static Long T = new Long(10);
+	static Long W = new Long(30);
+	Long wTime;
+	HashMap<Object, Test.CarInfo> cars = new HashMap<Object, Test.CarInfo>();
+	ArrayList<Long> times = new ArrayList<Long>();
+	
+	/*
+	Helper: returns whether the car coordinates are within the segment coordinates. 
+	This is the case of the car x-coordinate is in between the segment
+	begin-x and end-x coordinates. Similarly for y coordinate. 
+	*/
+	Boolean inSegment(Test.CarCoordinate cc, Test.SegmentCoordinate sc) {
+		if (cc == null) return false;
+		if (sc == null) return false;
+		return (
+			Test.isInBetween(sc.beginx, sc.endx, cc.x) && Test.isInBetween(sc.beginy, sc.endy, cc.y)
+		);
+	}
+	
+	/*
+	Computes the average waiting time for cars being located in a road segment. 
+	Each passed event represents the car entering or leaving the road segment. 
+	If a car entered the segment (it is not contained in the car list), the car infos 
+	are added to the car list. If a car leaves the segment (it is contained in the 
+	car list), the car is removed from the list and its travelling time (the time 
+	indicating how long the car has been on the segment) is calculated and added 
+	to the times array. The function returns the average waiting time. 
+	*/
+	static Long computeAverageWaitingTime(HashMap<Object, Test.CarInfo> cars, ArrayList<Long> times, EventType evt) {
+		string carId = (cast String evt.get("id"));
+		if (cars.get(carId) == null) {
+			cars.put(carId, new Test.CarInfo((cast CarEvent evt)));
+		}
+		else {
+			times.add(Test.computeTravelTime(cars.get(carId), (cast CarEvent evt)));
+			cars.remove(carId);
+		}
+		Long avg = Test.computeAverageTime(times);
+		return avg;
+	}
+	
+	{Construct} appearance (
+		input in [CarEvent] && 
+		inSegment((cast Test.CarCoordinate input.get("coordinate")), segmentCoordinate)
+	) {
+		initializer {
+			HashMap<Object, Test.CarInfo> aCars = new HashMap<Object, Test.CarInfo>();
+			ArrayList<Long> aTimes = new ArrayList<Long>();
+		}
+		Long avg = computeAverageWaitingTime(aCars, aTimes, input);
+		if (avg >= W) {
+			construct;
+			System.out.println("[Module Construction]: module segment coordinates " + segmentCoordinate.beginx + "-" + segmentCoordinate.beginy + "-" + segmentCoordinate.endx + "-" + segmentCoordinate.endy);
+			wTime = avg;
+			cars.putAll(aCars);
+			times.addAll(aTimes);
+		}
+	}
+	
+	{Destruct} disappearance (
+		input in [CarEvent] && 
+		inSegment((cast Test.CarCoordinate input.get("coordinate")), segmentCoordinate)
+	) {
+		wTime = computeAverageWaitingTime(cars, times, input);
+		if (wTime < W) {
+			destruct;
+			System.out.println("[Module Destruction]: module segment coordinates " + segmentCoordinate.beginx + "-" + segmentCoordinate.beginy + "-" + segmentCoordinate.endx + "-" + segmentCoordinate.endy);
+		}
+	}
+	
+	@ disappearance terminate
+	{} update (
+		input in [CarEvent] && 
+		inSegment((cast Test.CarCoordinate input.get("coordinate")), segmentCoordinate)
+	) {
+		/*
+		Calculating the av. waiting time here again leads to a wrong application, 
+		because the disappearance already did so. If it is done again, the same 
+		car event is considered again. For example, the current input event 
+		represents a car entering the road segment. The disappearance registers 
+		this. If the av. waiting time is computed here again, the current event 
+		is treated again as the car leaving the road. 
+		*/
+		/*wTime = computeAverageWaitingTime(cars, times, input);*/
+	}
+	
+	@ disappearance terminate
+	{} log (
+		input in [LogEvent]
+	) {
+		System.out.println("[Log] waiting time: " + wTime);
+	}
+	
+	@ disappearance terminate
+	{} display (
+		input in [DisplayEvent]
+	) {
+		System.out.println("[Display] waiting time: " + wTime);
+	}
+	
+	@ disappearance terminate
+	{} getWaitingTime (
+		input in [GetInfoEvent]
+	) {
+		(cast GetInfoEvent input).setWaitingTime(wTime);
+	}
+}

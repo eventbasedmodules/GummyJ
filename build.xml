@@ -1,0 +1,119 @@
+<project name="gummyj-server">
+	
+	<!-- GummyJ script file name (without .gm extension); change to whatever you like -->
+	<property name="gmscript" value="test" />
+	
+	<!-- Java file containing the main function of the application; change to whatever you like -->
+	<property name="path.main.app" value="org.gummymodules.app.Test" />
+	
+	<!-- properties -->
+	<property name="dir.lib" value="lib" />
+	<property name="dir.build" value="build" />
+	<property name="dir.generated" value="src_generated" />
+	<property name="dir.gm" value="src_gm" />
+	<property name="dir.java" value="src_java" />
+	<property name="dir.gummyj" value="src_gummyj" />
+	<property name="dir.class" value="${dir.build}/class" />
+	<property name="dir.out" value="${dir.build}/jar" />
+	<property name="file.compiler" value="compiler/gmprocess" />
+	<property name="file.script" value="${dir.gm}/${gmscript}.gm" />
+	<property name="file.pack.generated" value="${dir.out}/lib-generated.jar" />
+	<property name="file.pack.app" value="${dir.out}/lib-app.jar" />
+	<property name="file.pack.all" value="${dir.out}/gummyj-app.jar" />
+	<property name="file.pack.lib.gummyj" value="${dir.lib}/gummyj-backend.jar" />
+	
+	<!-- set the path to the libraries; add further libraries here if needed -->
+	<path id="libs">
+		<fileset dir="${dir.lib}">
+			<include name="Java-WebSocket-1.3.0.jar" />
+			<include name="json-20140107.jar" />
+			<include name="enshell-bin.beta1.jar" />
+			<include name="gummyj-backend.jar" />
+		</fileset>
+	</path>
+	
+	<!-- remove the build and generated files -->
+	<target name="bin-clear">
+		<delete dir="${dir.build}" />
+		<delete dir="${dir.generated}" />
+	</target>
+	
+	<!-- generate Java code from the GummyJ script via the GummyJ compiler -->
+	<target name="bin-generate">
+		<delete dir="${dir.generated}" />
+		<mkdir dir="${dir.generated}" />
+		<exec executable="${file.compiler}">
+			<arg value="--source=${file.script}" />
+			<arg value="--destination=${dir.generated}" />
+			<arg value="--indentation=tabs" />
+			<arg value="--log=1" />
+		</exec>
+	</target>
+	
+	<!-- build the Java files (application files and generated files) -->
+	<target name="bin-build">
+		<delete dir="${dir.build}" />
+		<mkdir dir="${dir.class}" />
+		<javac srcdir="${dir.java}:${dir.generated}" destdir="${dir.class}" debug="true" debuglevel="lines,vars,source" includeAntRuntime="false">
+			<classpath refid="libs" />
+		</javac>
+	</target>
+	
+	<!-- pack the generated files as jar library -->
+	<target name="bin-pack-generated" depends="bin-build">
+		<delete file="${file.pack.generated}" />
+		<mkdir dir="${dir.out}" />
+		<jar destfile="${file.pack.generated}">
+			<fileset dir="${dir.class}" includes="org/gummymodules/generated/**" />
+		</jar>
+	</target>
+	
+	<!-- pack the application files as jar library -->
+	<target name="bin-pack-app" depends="bin-build">
+		<delete file="${file.pack.app}" />
+		<mkdir dir="${dir.out}" />
+		<jar destfile="${file.pack.app}">
+			<fileset dir="${dir.class}" includes="org/gummymodules/app/**" />
+			<zipgroupfileset dir="${dir.lib}" />
+		</jar>
+	</target>
+	
+	<!-- pack both the application files and generated files -->
+	<target name="bin-pack-all" depends="bin-pack-generated,bin-pack-app">
+		<delete file="${file.pack.all}" />
+		<mkdir dir="${dir.out}" />
+		<jar destfile="${file.pack.all}">
+			<zipgroupfileset dir="${dir.out}" />
+			<manifest>
+				<attribute name="Main-Class" value="${path.main.app}" />
+			</manifest>
+		</jar>
+	</target>
+	
+	<!-- completely build and run the GummyJ application -->
+	<target name="bin-run" depends="bin-pack-all">
+		<java jar="${file.pack.all}" classpath="${dir.class}" fork="true">
+		</java>
+	</target>
+	
+	<!-- run the GummyJ application without rebuilding the application -->
+	<target name="bin-run-without-rebuild">
+		<java jar="${file.pack.all}" classpath="${dir.class}" fork="true">
+		</java>
+	</target>
+	
+	<!-- pack the GummyJ back-end files; the back-end files must be located in the folder "src_gummyj"  -->
+	<target name="bin-pack-gummyj">
+		<delete dir="${dir.build}" />
+		<mkdir dir="${dir.class}" />
+		<javac srcdir="${dir.gummyj}" destdir="${dir.class}" debug="true" debuglevel="lines,vars,source" includeAntRuntime="false">
+			<classpath refid="libs" />
+		</javac>
+		<delete file="${file.pack.lib.gummyj}" />
+		<jar destfile="${file.pack.lib.gummyj}">
+			<fileset dir="${dir.class}" includes="org/gummymodules/core/**" />
+		</jar>
+	</target>
+	
+</project>
+

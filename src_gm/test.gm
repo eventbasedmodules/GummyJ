@@ -1,0 +1,197 @@
+package org.gummymodules.generated;
+
+
+eventtype BeginEvent {}
+eventtype EndEvent {}
+eventtype FileEvents {
+	string fileID;
+	string userrole;
+}
+eventtype OpenEvent extends FileEvents {
+	string mode;
+}
+eventtype ReadEvent extends FileEvents {
+	string content;
+}
+eventtype WriteEvent extends FileEvents {
+	string content;
+}
+eventtype CloseEvent extends FileEvents {}
+eventtype TimeoutEvent {
+	string fileID;
+	string userID;
+	int opentime;
+}
+eventtype OutofOrderEvent {
+	string fileID;
+	string userID;
+}
+
+/*
+This module filters file events by the given userID and fileID 
+and publishes matching input events. 
+*/
+gummymodule FilterUsers(string userID, string fileID) {
+	shared int counter;
+	
+	selectors {filter}
+	reactors {filter}
+	publishers {filter}
+	
+	{FileEvents} filter (
+		input in [FileEvents]
+		&& input.get("publisher").equals(userID)
+		&& input.get("userrole").equals("premium")
+		&& input.get("fileID").equals(fileID)
+	) {
+		publish input;
+	}
+}
+
+/*
+This module checks for order violations. 
+A valid order is: (open (read | write)* close)*
+*/
+gummymodule CheckOrder() {
+	boolean opened = false;
+	
+	EventType create(EventType source) {
+		OutofOrderEvent output = new OutofOrderEvent();
+		output.set("fileID", source.get("fileID"));
+		output.set("userID", source.get("publisher"));
+		return output;
+	}
+	
+	selectors {check}
+	reactors {check}
+	publishers {check}
+	
+	{OutofOrderEvent} check (input in [FileEvents]) {
+		if (input in [OpenEvent]) {
+			if (! opened) {
+				opened = true;
+			}
+			else {
+				publish create(input);
+			}
+		}
+		else if (input in [ReadEvent,WriteEvent]) {
+			if (! opened) {
+				publish create(input);
+			}
+		}
+		else if (input in [CloseEvent]) {
+			if (! opened) {
+				publish create(input);
+			}
+			else {
+				opened = false;
+			}
+		}
+	}
+}
+
+/*
+This module checks for timeouts. Each time, a file is read, 
+written to or closed, the timer is reset. 
+*/
+gummymodule CheckTimeout() {
+	boolean opened = false;
+	long last;
+	long timer;
+	int ttl = 2000;
+	
+	long getCurrent() {
+		return System.currentTimeMillis();
+	}
+	
+	long init() {
+		last = getCurrent();
+		return 0;
+	}
+	
+	long update() {
+		return (getCurrent() - last);
+	}
+	
+	long reset() {
+		last = getCurrent();
+		return 0;
+	}
+	
+	selectors {open, readwrite, close}
+	reactors {open, readwrite, close}
+	publishers {readwrite}
+	
+	{} open (input in [OpenEvent]) {
+		if (!opened) {
+			opened = true;
+			timer = init();
+		}
+	}
+	
+	{TimeoutEvent} readwrite (input in [ReadEvent, WriteEvent]) {
+		timer = update();
+		if (timer >= ttl) {
+			TimeoutEvent output = new TimeoutEvent();
+			output.set("fileID", input.get("fileID"));
+			output.set("userID", input.get("publisher"));
+			output.set("opentime", timer);
+			publish output;
+		}
+		else {
+			timer = reset();
+		}
+	}
+	
+	{} close (input in [CloseEvent]) {
+		timer = reset();
+		opened = false;
+	}
+}
+
+/*
+This module counts timeouts and publishes a 
+Timeout event if the counter exceeds 3. 
+*/
+gummymodule FilterEvents() {
+	int counter = 0;
+	
+	selectors {filter}
+	reactors {filter}
+	publishers {filter}
+	
+	{TimeoutEvent, OutofOrderEvent} filter (input in [TimeoutEvent, OutofOrderEvent]) {
+		if (input in [TimeoutEvent]) {
+			counter = counter + 1;
+			if (counter > 3) {
+				publish input;
+			}
+		}
+		else {
+			publish input;
+		}
+	}
+}
+
+/*
+This module is responsible for checking for order and timeout 
+violations of file events sent by the application. This module 
+represents file events of the specified userID and fileID. 
+*/
+emergentgummymodule PremiumUsersEPAs(string userID, string fileID) {
+	
+	selectors {appearance, disappearance, FilterUsers(userID, fileID)}
+	reactors {appearance, disappearance, CheckOrder, CheckTimeout}
+	publishers {appearance, disappearance, FilterEvents}
+	
+	{Construct} appearance (input in [BeginEvent]) {
+		initializer {}
+		construct;
+	}
+	
+	{Destruct} disappearance (input in [EndEvent]) {
+		destruct;
+	}
+}
+
